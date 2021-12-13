@@ -21,6 +21,7 @@
 #include <QtQml>
 #include "application_p.h"
 #include "flatmesh.h"
+#include "gesturefilterarea.h"
 #include "icon.h"
 
 ControlsPlugin::ControlsPlugin(QObject *parent) : QQmlExtensionPlugin(parent)
@@ -35,6 +36,7 @@ void ControlsPlugin::registerTypes(const char *uri)
 
     qmlRegisterType<Application_p>(uri, 1, 0, "Application_p");
     qmlRegisterType<FlatMesh>(uri, 1, 0, "FlatMesh");
+    qmlRegisterType<GestureFilterArea>(uri, 1, 0, "GestureFilterArea");
     qmlRegisterType<Icon>(uri, 1, 0, "Icon");
 }
 
