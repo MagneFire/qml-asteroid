@@ -22,8 +22,10 @@ import org.asteroid.controls 1.0
 Application_p {
     anchors.fill: parent
 
-    property alias outerColor: fm.outerColor
-    property alias centerColor: fm.centerColor
+    //property alias outerColor: fm.outerColor
+    //property alias centerColor: fm.centerColor
+    property var outerColor: 0
+    property var centerColor: 0
 
     function animIndicators() {
         rightIndicator.animate();
@@ -35,6 +37,8 @@ Application_p {
     FlatMesh {
         id: fm
         anchors.fill: parent
+        centerColor: bgCenterColor
+        outerColor: bgOuterColor
     }
 
     property alias rightIndicVisible:  rightIndicator.visible

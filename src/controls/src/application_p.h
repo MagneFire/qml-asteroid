@@ -32,23 +32,31 @@
 
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QColor>
 
 class Application_p : public QQuickItem
 {
     Q_OBJECT
     Q_PROPERTY(QQuickWindow* window READ window CONSTANT)
     Q_PROPERTY(bool overridesSystemGestures READ overridesSystemGestures WRITE setOverridesSystemGestures NOTIFY overridesSystemGesturesChanged)
+    Q_PROPERTY(QColor bgCenterColor READ getCenterColor NOTIFY centerColorChanged)
+    Q_PROPERTY(QColor bgOuterColor READ getOuterColor NOTIFY outerColorChanged)
 
 public:
     explicit Application_p();
     Q_INVOKABLE void setOverridesSystemGestures(bool enable);
     bool overridesSystemGestures();
 
+    QColor getCenterColor() const { return m_centerColor; }
+    QColor getOuterColor() const { return m_outerColor; }
 private:
     bool m_overridesSystemGestures;
+    QColor m_centerColor, m_outerColor;
 
 signals:
     void overridesSystemGesturesChanged();
+    void centerColorChanged();
+    void outerColorChanged();
 };
 
 #endif // APPLICATION_P_H

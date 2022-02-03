@@ -28,10 +28,39 @@
  */
 
 #include "application_p.h"
+#include <QFileInfo>
+#include <QSettings>
+
+static QString applicationPath()
+{
+    QString argv0 = QCoreApplication::arguments()[0];
+
+    if (argv0.startsWith("/")) {
+        // First, try argv[0] if it's an absolute path (needed for booster)
+        return argv0;
+    } else {
+        // If that doesn't give an absolute path, use /proc-based detection
+        return QCoreApplication::applicationFilePath();
+    }
+}
+QString appName()
+{
+    QFileInfo exe = QFileInfo(applicationPath());
+    return exe.fileName();
+}
 
 Application_p::Application_p() : QQuickItem()
 {
     m_overridesSystemGestures = false;
+    QString filePath = "/usr/share/applications/" + appName() + ".desktop";
+
+    QSettings settings(filePath, QSettings::NativeFormat);
+    QColor ret(settings.value("Desktop Entry/X-Asteroid-Center-Color", QColor("#888888")).toString());
+    m_centerColor = ret;
+    emit centerColorChanged();
+    ret = settings.value("Desktop Entry/X-Asteroid-Outer-Color", QColor("#000000")).toString();
+    m_outerColor = ret;
+    emit outerColorChanged();
 }
 
 void Application_p::setOverridesSystemGestures(bool enable)
