@@ -3,13 +3,15 @@ set(SRC
 	src/application_p.cpp
 	src/flatmesh.cpp
 	src/flatmeshnode.cpp
-	src/icon.cpp)
+	src/icon.cpp
+	src/fpstext.cpp)
 set(HEADERS
 	src/controls_plugin.h
 	src/application_p.h
 	src/flatmesh.h
 	src/flatmeshnode.h
-	src/icon.h)
+	src/icon.h
+	src/fpstext.h)
 
 add_library(asteroidcontrolsplugin ${SRC} ${HEADERS} resources.qrc)
 

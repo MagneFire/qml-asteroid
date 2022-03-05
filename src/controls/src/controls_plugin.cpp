@@ -22,6 +22,7 @@
 #include "application_p.h"
 #include "flatmesh.h"
 #include "icon.h"
+#include "fpstext.h"
 
 ControlsPlugin::ControlsPlugin(QObject *parent) : QQmlExtensionPlugin(parent)
 {
@@ -36,5 +37,6 @@ void ControlsPlugin::registerTypes(const char *uri)
     qmlRegisterType<Application_p>(uri, 1, 0, "Application_p");
     qmlRegisterType<FlatMesh>(uri, 1, 0, "FlatMesh");
     qmlRegisterType<Icon>(uri, 1, 0, "Icon");
+    qmlRegisterType<FPSText>(uri, 1, 0, "FPSText");
 }
 
