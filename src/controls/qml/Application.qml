@@ -19,6 +19,7 @@
 import QtQuick 2.9
 import org.asteroid.controls 1.0
 import org.asteroid.utils 1.0
+import Nemo.Configuration 1.0
 
 Application_p {
     anchors.fill: parent
@@ -33,9 +34,32 @@ Application_p {
         bottomIndicator.animate();
     }
 
+    ConfigurationValue {
+        id: fpsCounter
+        key: "/org/asteroidos/settings/fps-counter"
+        defaultValue: false
+    }
+
     FlatMesh {
         id: fm
         anchors.fill: parent
+    }
+
+    FPSText {
+        id: fps
+        visible: fpsCounter.value
+        enabled: visible
+        anchors.fill: parent
+        z: 10
+        Label {
+            anchors.top: parent.top
+            anchors.topMargin: Dims.h(2)
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: fps.fps
+            font.styleName: "Bold"
+            style: Text.Outline
+            styleColor: fps.fps > 50 ? "green" : "red"
+        }
     }
 
     property alias rightIndicVisible:  rightIndicator.visible
