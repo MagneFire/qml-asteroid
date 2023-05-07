@@ -32,14 +32,13 @@ Item {
     property int iconSize: Dims.l(20)
     // size of the label text
     property int labelFontSize: Dims.l(6)
-    // onClicked dummy function can be overridden by caller
-    property var onClicked: function(){}
+    signal clicked()
 
     width: parent.width
     height: parent.height
 
     HighlightBar {
-        onClicked: function() { parent.onClicked() }
+        onClicked: parent.clicked()
     }
 
     Label {

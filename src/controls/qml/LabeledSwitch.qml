@@ -64,6 +64,6 @@ Item {
     }
 
     HighlightBar {
-        onClicked: function() {toggle.checked = !toggle.checked}
+        onClicked: toggle.checked = !toggle.checked
     }
 }
