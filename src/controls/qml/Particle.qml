@@ -80,6 +80,7 @@ Item {
     id: particleRoot
     width: maxSize
     height: maxSize
+    visible: false
 
     /*!
         \qmlproperty real Particle::maxSize
@@ -117,13 +118,7 @@ Item {
     */
     property rect clipBounds: Qt.rect(0, 0, 0, 0)
 
-    // Define design-specific properties
-    property var designProperties: {
-        "diamonds": { initialSize: 0.3, maxSize: 0.9, initialOpacity: 0, maxOpacity: 0.6 },
-        "bubbles": { initialSize: 0.3, maxSize: 0.9, initialOpacity: 0, maxOpacity: 0.6 },
-        "logos": { initialSize: 0.4, maxSize: 1.2, initialOpacity: 0, maxOpacity: 0.6 },
-        "flashes": { initialSize: 0.6, maxSize: 1.4, initialOpacity: 0, maxOpacity: 0.6 }
-    }
+    signal finished()
 
     property var designObject: switch(particleRoot.design) {
                         case "diamonds": return diamond;
@@ -140,7 +135,9 @@ Item {
         }
 
         if (x < clipBounds.x - maxSize || x > clipBounds.x + clipBounds.width) {
-            particleRoot.destroy();
+            console.log(`${particleRoot}: Went out of bounce`);
+            particleRoot.visible = false;
+            finished();
         }
     }
 
@@ -150,7 +147,11 @@ Item {
         interval: lifetime
         running: true
         repeat: false
-        onTriggered: particleRoot.destroy()
+        onTriggered: {
+            console.log(`${particleRoot}: Is no longer alive`);
+            particleRoot.visible = false;
+            finished();
+        }
     }
 
     // Diamond design
@@ -283,5 +284,12 @@ Item {
                 easing.type: Easing.InQuad
             }
         }
+    }
+
+    function reset() {
+        designObject.particleSize = designObject.initialSize;
+        designObject.particleOpacity = designObject.initialOpacity;
+        particleAnimation.restart();
+        destroyTimer.restart();
     }
 }
