@@ -29,80 +29,54 @@
 
 #include <QOpenGLShaderProgram>
 #include <QOpenGLFunctions>
+#include <QOpenGLContext>
 #include <QSettings>
+#include <QQuickWindow>
 
 #include "flatmesh.h"
 #include "flatmeshgeometry.h"
 
-// Our Adreno drivers fail to load shaders that are too long so we have to be concise and skip
-// every unnecessary character such as spaces, \n, etc... This is effectively one long line!
+// ============================================================================
+// GLES 2.0 SHADERS
+// ============================================================================
+
 static const char *vertexShaderSource =
-    // Qt dynamically injects an "attribute" before main. With GLES3, this should be "in"
-    "#define attribute in\n"
-
-    // Attributes are per-vertex information, they give base coordinates and colors
-    "in vec4 coord;"
-    "in vec4 color;"
-
-    // Uniforms are FlatMesh-wide, they give scaling information, the animation state or shifts
-    "uniform mat4 matrix;"
-    "uniform float shiftMix;"
-    "uniform int loopNb;"
-    "uniform vec2 shifts[" FLATMESH_SHIFTS_NB_STR "];"
-
-    // This is the color vector outputted here and forwarded to the fragment shaders
-    // The flat keyword enables flat shading (no interpolation between the vertices of a triangle)
-    "flat out vec4 fragColor;"
-
-    "void main()"
-    "{"
-         // Two vertices can have the same coordinate (if they give different colors to 2 triangles)
-         // However, they need to move in sync, so we hash their coordinates as an index for shifts
-        "int xHash = int(coord.x * 100.0);"
-        "int yHash = int(coord.y * 100.0);"
-        "int shiftIndex = loopNb+xHash+yHash;"
-
-         // Interpolate between (coord + shiftA) and (coord + shiftB) in the [-0.5, 0.5] domain
-        "vec2 pos = coord.xy + mix(shifts[(shiftIndex)%"   FLATMESH_SHIFTS_NB_STR "],"
-                                  "shifts[(shiftIndex+1)%" FLATMESH_SHIFTS_NB_STR "],"
-                                  "shiftMix);"
-
-        // Apply scene graph transformations (FlatMesh position and size) to get the final coords
-        "gl_Position = matrix * vec4(pos, 0, 1);"
-
-        // Forward the color in the vertex attribute to the fragment shaders
-        "fragColor = color;"
-    "}";
+    "attribute vec4 coord;\n"
+    "attribute vec4 color;\n"
+    "uniform mat4 matrix;\n"
+    "varying vec4 fragColor;\n"
+    "void main()\n"
+    "{\n"
+        "gl_Position = matrix * vec4(coord.xy, 0.0, 1.0);\n"
+        "fragColor = color;\n"
+    "}\n";
 
 static const char *fragmentShaderSource =
     "#ifdef GL_ES\n"
-    "precision mediump float;"
-    "\n#endif\n"
-
-    // The flat keyword disables interpolation in triangles
-    // Each pixel gets the color of the last vertex of the triangle it belongs to
-    "flat in vec4 fragColor;"
-    "out vec4 color;"
-
-    // Just keep the provided color
-    "void main()"
-    "{"
-        "color = fragColor;"
-    "}";
+    "precision mediump float;\n"
+    "#endif\n"
+    "varying vec4 fragColor;\n"
+    "void main()\n"
+    "{\n"
+        "gl_FragColor = fragColor;\n"
+    "}\n";
 
 static QByteArray versionedShaderCode(const char *src)
 {
     return (QOpenGLContext::currentContext()->isOpenGLES()
-            ? QByteArrayLiteral("#version 300 es\n")
-            : QByteArrayLiteral("#version 330\n"))
+            ? QByteArrayLiteral("#version 100\n")
+            : QByteArrayLiteral("#version 120\n"))
               + src;
 }
 
-// This class wraps the FlatMesh vertex and fragment shaders
+// ============================================================================
+// MATERIAL SHADER CLASS
+// ============================================================================
+
 class SGFlatMeshMaterialShader : public QSGMaterialShader
 {
 public:
-    SGFlatMeshMaterialShader() {}
+    SGFlatMeshMaterialShader() : m_matrix_id(-1) {}
     const char *vertexShader() const override {
         static QByteArray source = versionedShaderCode(vertexShaderSource);
         return source.constData();
@@ -114,8 +88,6 @@ public:
     void updateState(const RenderState &state, QSGMaterial *newEffect, QSGMaterial *oldEffect) override {
         // On every run, update the animation state uniforms
         SGFlatMeshMaterial *material = static_cast<SGFlatMeshMaterial *>(newEffect);
-        program()->setUniformValue(m_shiftMix_id, material->shiftMix());
-        program()->setUniformValue(m_loopNb_id, material->loopNb());
 
         if (state.isMatrixDirty()) {
             // Vertices coordinates are always in the [-0.5, 0.5] range, modify QtQuick's projection matrix to do the scaling for us
@@ -125,32 +97,19 @@ public:
             combinedMatrix.scale(material->screenScaleFactor());
             program()->setUniformValue(m_matrix_id, combinedMatrix);
         }
-        // Enable a mode such that 0xFF indices mean "restart a strip"
-        m_glFuncs->glEnable(GL_PRIMITIVE_RESTART_FIXED_INDEX);
     }
     char const *const *attributeNames() const override {
         // Map attribute numbers to attribute names in the vertex shader
         static const char *const attr[] = { "coord", "color", nullptr };
         return attr;
     }
-    void deactivate() override {
-        m_glFuncs->glDisable(GL_PRIMITIVE_RESTART_FIXED_INDEX);
-    }
-private:
+    
     void initialize() override {
-        // Seed the array of shifts with pre-randomized shifts
-        program()->setUniformValueArray("shifts", flatmesh_shifts, flatmesh_shifts_nb, 2);
-        // Get the ids of the uniforms we regularly update
         m_matrix_id = program()->uniformLocation("matrix");
-        m_shiftMix_id = program()->uniformLocation("shiftMix");
-        m_loopNb_id = program()->uniformLocation("loopNb");
-        // Retrieve OpenGL functions available on all platforms
-        m_glFuncs = QOpenGLContext::currentContext()->functions();
     }
+    
+private:
     int m_matrix_id;
-    int m_shiftMix_id;
-    int m_loopNb_id;
-    QOpenGLFunctions *m_glFuncs;
 };
 
 QSGMaterialShader *SGFlatMeshMaterial::createShader() const
@@ -158,25 +117,80 @@ QSGMaterialShader *SGFlatMeshMaterial::createShader() const
     return new SGFlatMeshMaterialShader;
 }
 
-FlatMesh::FlatMesh(QQuickItem *parent) : QQuickItem(parent), m_geometry(QSGGeometry::defaultAttributes_ColoredPoint2D(), flatmesh_vertices_sz, flatmesh_indices_sz)
+// ============================================================================
+// FLATMESH IMPLEMENTATION
+// ============================================================================
+
+FlatMesh::FlatMesh(QQuickItem *parent) 
+    : QQuickItem(parent)
+    , m_geometry(QSGGeometry::defaultAttributes_ColoredPoint2D(), 0, 0)
+    , m_animated(false)
+    , m_geometryDirty(false)
 {
-    // Don't overflow the item dimensions
     setClip(true);
 
     // Dilate the FlatMesh more or less on squared or round screens
     QSettings machineConf("/etc/asteroid/machine.conf", QSettings::IniFormat);
     m_material.setScreenScaleFactor(machineConf.value("Display/ROUND", false).toBool() ? 1.2 : 1.7);
 
-    // Iterate over all vertices and assign them the coordinates of their base point from flatmesh_vertices
-    QSGGeometry::ColoredPoint2D *vertices = m_geometry.vertexDataAsColoredPoint2D();
-    for (int i = 0; i < flatmesh_vertices_sz; i++) {
-        vertices[i].x = flatmesh_vertices[i].x();
-        vertices[i].y = flatmesh_vertices[i].y();
-    }
-    // Copy the indices buffer (already in the right format)
-    memcpy(m_geometry.indexData(), flatmesh_indices, sizeof(flatmesh_indices));
+    // --- FLAT SHADING FIX: Expand Triangle Strips to Independent Triangles ---
+    // GLES 2.0 does not support 'flat' interpolation. To achieve flat shading,
+    // we cannot share vertices between triangles. We must duplicate vertices so
+    // that each triangle can have a uniform color across all 3 corners.
 
-    // Give initial colors to the vertices
+    QVector<unsigned short> triangleIndices;
+    int stripStart = 0;
+    
+    // 1. Convert Strips to Triangles
+    for (int i = 0; i < flatmesh_indices_sz; ++i) {
+        if (flatmesh_indices[i] == 65535 || i == flatmesh_indices_sz - 1) {
+            int end = (flatmesh_indices[i] == 65535) ? i : i + 1;
+            int len = end - stripStart;
+            
+            for (int j = 0; j < len - 2; ++j) {
+                int i0 = stripStart + j;
+                int i1 = stripStart + j + 1;
+                int i2 = stripStart + j + 2;
+                
+                unsigned short v0 = flatmesh_indices[i0];
+                unsigned short v1 = flatmesh_indices[i1];
+                unsigned short v2 = flatmesh_indices[i2];
+                
+                // Handle winding order swap for odd triangles in strip
+                if (j % 2 == 0) {
+                    triangleIndices.append(v0);
+                    triangleIndices.append(v1);
+                    triangleIndices.append(v2);
+                } else {
+                    triangleIndices.append(v0);
+                    triangleIndices.append(v2);
+                    triangleIndices.append(v1);
+                }
+            }
+            stripStart = i + 1;
+        }
+    }
+    
+    // 2. Expand indices into a pure vertex buffer (No Index Buffer)
+    int totalTriangles = triangleIndices.size() / 3;
+    int totalVertices = totalTriangles * 3;
+    
+    m_geometry.allocate(totalVertices, 0); // 0 indices, we use DrawArrays
+    m_geometry.setDrawingMode(GL_TRIANGLES);
+    m_geometry.setVertexDataPattern(QSGGeometry::DynamicPattern);
+
+    // Store source indices for animation updates
+    m_vertexSourceIndices = triangleIndices;
+
+    // Initialize vertices
+    QSGGeometry::ColoredPoint2D *vertices = m_geometry.vertexDataAsColoredPoint2D();
+    for (int i = 0; i < totalVertices; i++) {
+        unsigned short srcIdx = m_vertexSourceIndices[i];
+        vertices[i].x = flatmesh_vertices[srcIdx].x();
+        vertices[i].y = flatmesh_vertices[srcIdx].y();
+        vertices[i].a = 255;
+    }
+
     setColors(QColor("#ffaa39"), QColor("#df4829"));
 
 
@@ -187,11 +201,12 @@ FlatMesh::FlatMesh(QQuickItem *parent) : QQuickItem(parent), m_geometry(QSGGeome
     m_animation.setDuration(4000);
     m_animation.setLoopCount(-1);
     m_animation.setEasingCurve(QEasingCurve::InOutQuad);
-    QObject::connect(&m_animation, &QVariantAnimation::currentLoopChanged, [this]() {
-        m_material.incrementLoopNb();
-    });
+    // QObject::connect(&m_animation, &QVariantAnimation::currentLoopChanged, [this]() {
+    //     m_material.incrementLoopNb();
+    // });
     QObject::connect(&m_animation, &QVariantAnimation::valueChanged, [this](const QVariant& value) {
-        m_material.setShiftMix(value.toFloat());
+        Q_UNUSED(value);
+        updateGeometry();
         update();
     });
 
@@ -205,19 +220,66 @@ FlatMesh::FlatMesh(QQuickItem *parent) : QQuickItem(parent), m_geometry(QSGGeome
 
 void FlatMesh::updateColors()
 {
-    // Iterate over all vertices and give them the rgb values of the triangle they represent
-    // In the flat shading model we use, each triangle is colored by its last vertex
     QSGGeometry::ColoredPoint2D *vertices = m_geometry.vertexDataAsColoredPoint2D();
-    for (int i = 0; i < flatmesh_vertices_sz; i++) {
-        // Ratios are pre-calculated to save some computation, we just need to do the mix
-        // We do the color blending on the CPU because center and outer colors change rarely
-        // and it would be a waste of GPU time to re-calculate that in every vertex shader
-        float ratio = flatmesh_vertices[i].z();
-        float inverse_ratio = 1-ratio;
-        vertices[i].r = m_centerColor.red()*inverse_ratio + m_outerColor.red()*ratio;
-        vertices[i].g = m_centerColor.green()*inverse_ratio + m_outerColor.green()*ratio;
-        vertices[i].b = m_centerColor.blue()*inverse_ratio + m_outerColor.blue()*ratio;
+    int totalTriangles = m_vertexSourceIndices.size() / 3;
+
+    for (int i = 0; i < totalTriangles; ++i) {
+        // Identify the provoking vertex (last vertex of the triangle, index 2)
+        int provokingIdx = i * 3 + 2;
+        unsigned short srcProvokingIdx = m_vertexSourceIndices[provokingIdx];
+
+        // Calculate color based on the provoking vertex's Z attribute
+        float ratio = flatmesh_vertices[srcProvokingIdx].z();
+        float ir = 1.0f - ratio;
+        
+        uchar r = static_cast<uchar>(m_centerColor.red() * ir + m_outerColor.red() * ratio);
+        uchar g = static_cast<uchar>(m_centerColor.green() * ir + m_outerColor.green() * ratio);
+        uchar b = static_cast<uchar>(m_centerColor.blue() * ir + m_outerColor.blue() * ratio);
+
+        // Apply the SAME color to all 3 vertices of the triangle.
+        // This simulates 'flat' shading on GLES 2.0.
+        for (int j = 0; j < 3; ++j) {
+            int vertIdx = i * 3 + j;
+            vertices[vertIdx].r = r;
+            vertices[vertIdx].g = g;
+            vertices[vertIdx].b = b;
+        }
     }
+
+    m_geometryDirty = true;
+}
+
+void FlatMesh::updateGeometry()
+{
+    QSGGeometry::ColoredPoint2D *vertices = m_geometry.vertexDataAsColoredPoint2D();
+    int totalVertices = m_vertexSourceIndices.size();
+
+    int loopNb = m_animation.currentLoop();
+    float shiftMix = m_animation.currentValue().toFloat();
+
+    for (int i = 0; i < totalVertices; ++i) {
+        // Look up the original source vertex data
+        unsigned short srcIdx = m_vertexSourceIndices[i];
+        
+        float baseX = flatmesh_vertices[srcIdx].x();
+        float baseY = flatmesh_vertices[srcIdx].y();
+
+        // Calculate Shift
+        int xHash = static_cast<int>(baseX * 100.0f);
+        int yHash = static_cast<int>(baseY * 100.0f);
+        int shiftIndex = loopNb + xHash + yHash;
+
+        int idxA = (shiftIndex % flatmesh_shifts_nb + flatmesh_shifts_nb) % flatmesh_shifts_nb;
+        int idxB = ((shiftIndex + 1) % flatmesh_shifts_nb + flatmesh_shifts_nb) % flatmesh_shifts_nb;
+
+        float shiftX = flatmesh_shifts[idxA * 2] + (flatmesh_shifts[idxB * 2] - flatmesh_shifts[idxA * 2]) * shiftMix;
+        float shiftY = flatmesh_shifts[idxA * 2 + 1] + (flatmesh_shifts[idxB * 2 + 1] - flatmesh_shifts[idxA * 2 + 1]) * shiftMix;
+
+        vertices[i].x = baseX + shiftX;
+        vertices[i].y = baseY + shiftY;
+    }
+
+    m_geometry.markVertexDataDirty();
     m_geometryDirty = true;
 }
 
@@ -276,6 +338,8 @@ QSGNode *FlatMesh::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
         n = new QSGGeometryNode;
         n->setOpaqueMaterial(&m_material);
         n->setGeometry(&m_geometry);
+        updateGeometry();
+        updateColors();
     }
 
     // On every update(), mark the material dirty so the shaders run again

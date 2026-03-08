@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 import pandas as pd
 import numpy as np
 import pyvista as pv
@@ -31,9 +31,17 @@ vertices = []
 indices = []
 
 # Each vertex is represented as a tuple of: x, y (its base coordinates, before any shift) and a color mixing ratio
-def add_vertex(index, mix=None):
+# In generate_flatmeshgeometry.py - Modified add_vertex function
+def add_vertex(index, mix=None, force_flat_color=False):
     x, y = points[index]
-
+    
+    # For flat shading emulation, each triangle needs identical vertex colors
+    if force_flat_color and mix is not None:
+        # Create unique vertex for this triangle's color
+        indices.append(len(vertices))
+        vertices.append((x, y, mix))
+        return
+    
     # Re-use existing vertices as much as possible
     for i, vertex in enumerate(vertices):
         if vertex[0] == x and vertex[1] == y:
