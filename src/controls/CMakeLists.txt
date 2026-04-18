@@ -22,7 +22,7 @@ else()
                 src/flatmeshgeometry.h)
 endif()
 
-add_library(asteroidcontrolsplugin ${SRC} ${HEADERS})
+add_library(asteroidcontrolsplugin ${SRC} ${HEADERS} resources.qrc)
 
 set(controls 
         Application
