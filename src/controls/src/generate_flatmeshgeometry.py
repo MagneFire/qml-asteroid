@@ -1,4 +1,11 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#     "pandas>=3.0.2",
+#     "pyvista>=0.47.3",
+# ]
+# ///
 import pandas as pd
 import numpy as np
 import pyvista as pv
@@ -10,7 +17,7 @@ nb_points = 100
 
 # Find the radius of nb_points packed circles from www.packomania.com
 radius_table = pd.read_csv("http://hydra.nat.uni-magdeburg.de/packing/cci/txt/radius.txt", header=None, sep=' ')
-radius = float(radius_table[radius_table[0]==nb_points][1])
+radius = float(radius_table.loc[radius_table[0] == nb_points, 1].iloc[0])
 
 # Download the coordinates of nb_points optimally packed circles
 points = pd.read_csv("http://hydra.nat.uni-magdeburg.de/packing/cci/txt/cci" + str(nb_points) + ".txt", sep=' ',
@@ -31,17 +38,9 @@ vertices = []
 indices = []
 
 # Each vertex is represented as a tuple of: x, y (its base coordinates, before any shift) and a color mixing ratio
-# In generate_flatmeshgeometry.py - Modified add_vertex function
-def add_vertex(index, mix=None, force_flat_color=False):
+def add_vertex(index, mix=None):
     x, y = points[index]
-    
-    # For flat shading emulation, each triangle needs identical vertex colors
-    if force_flat_color and mix is not None:
-        # Create unique vertex for this triangle's color
-        indices.append(len(vertices))
-        vertices.append((x, y, mix))
-        return
-    
+
     # Re-use existing vertices as much as possible
     for i, vertex in enumerate(vertices):
         if vertex[0] == x and vertex[1] == y:
