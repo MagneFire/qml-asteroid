@@ -129,60 +129,25 @@ FlatMesh::FlatMesh(QQuickItem *parent)
 {
     setClip(true);
 
-    // Dilate the FlatMesh more or less on squared or round screens
     QSettings machineConf("/etc/asteroid/machine.conf", QSettings::IniFormat);
     m_material.setScreenScaleFactor(machineConf.value("Display/ROUND", false).toBool() ? 1.2 : 1.7);
 
-    // --- FLAT SHADING FIX: Expand Triangle Strips to Independent Triangles ---
-    // GLES 2.0 does not support 'flat' interpolation. To achieve flat shading,
-    // we cannot share vertices between triangles. We must duplicate vertices so
-    // that each triangle can have a uniform color across all 3 corners.
-
-    QVector<unsigned short> triangleIndices;
-    int stripStart = 0;
+    // === CHANGED: Indices are now already independent triangles ===
+    // No strip conversion needed - use indices directly with GL_TRIANGLES
     
-    // 1. Convert Strips to Triangles
-    for (int i = 0; i < flatmesh_indices_sz; ++i) {
-        if (flatmesh_indices[i] == 65535 || i == flatmesh_indices_sz - 1) {
-            int end = (flatmesh_indices[i] == 65535) ? i : i + 1;
-            int len = end - stripStart;
-            
-            for (int j = 0; j < len - 2; ++j) {
-                int i0 = stripStart + j;
-                int i1 = stripStart + j + 1;
-                int i2 = stripStart + j + 2;
-                
-                unsigned short v0 = flatmesh_indices[i0];
-                unsigned short v1 = flatmesh_indices[i1];
-                unsigned short v2 = flatmesh_indices[i2];
-                
-                // Handle winding order swap for odd triangles in strip
-                if (j % 2 == 0) {
-                    triangleIndices.append(v0);
-                    triangleIndices.append(v1);
-                    triangleIndices.append(v2);
-                } else {
-                    triangleIndices.append(v0);
-                    triangleIndices.append(v2);
-                    triangleIndices.append(v1);
-                }
-            }
-            stripStart = i + 1;
-        }
-    }
-    
-    // 2. Expand indices into a pure vertex buffer (No Index Buffer)
-    int totalTriangles = triangleIndices.size() / 3;
-    int totalVertices = totalTriangles * 3;
+    int totalVertices = flatmesh_indices_sz;  // Already 3 indices per triangle
     
     m_geometry.allocate(totalVertices, 0); // 0 indices, we use DrawArrays
     m_geometry.setDrawingMode(GL_TRIANGLES);
     m_geometry.setVertexDataPattern(QSGGeometry::DynamicPattern);
 
-    // Store source indices for animation updates
-    m_vertexSourceIndices = triangleIndices;
+    // Store source indices for animation/color updates
+    m_vertexSourceIndices.reserve(totalVertices);
+    for (int i = 0; i < flatmesh_indices_sz; ++i) {
+        m_vertexSourceIndices.append(flatmesh_indices[i]);
+    }
 
-    // Initialize vertices
+    // Initialize base vertex positions
     QSGGeometry::ColoredPoint2D *vertices = m_geometry.vertexDataAsColoredPoint2D();
     for (int i = 0; i < totalVertices; i++) {
         unsigned short srcIdx = m_vertexSourceIndices[i];
@@ -201,9 +166,7 @@ FlatMesh::FlatMesh(QQuickItem *parent)
     m_animation.setDuration(4000);
     m_animation.setLoopCount(-1);
     m_animation.setEasingCurve(QEasingCurve::InOutQuad);
-    // QObject::connect(&m_animation, &QVariantAnimation::currentLoopChanged, [this]() {
-    //     m_material.incrementLoopNb();
-    // });
+
     QObject::connect(&m_animation, &QVariantAnimation::valueChanged, [this](const QVariant& value) {
         Q_UNUSED(value);
         updateGeometry();
@@ -224,20 +187,17 @@ void FlatMesh::updateColors()
     int totalTriangles = m_vertexSourceIndices.size() / 3;
 
     for (int i = 0; i < totalTriangles; ++i) {
-        // Identify the provoking vertex (last vertex of the triangle, index 2)
-        int provokingIdx = i * 3 + 2;
-        unsigned short srcProvokingIdx = m_vertexSourceIndices[provokingIdx];
-
-        // Calculate color based on the provoking vertex's Z attribute
-        float ratio = flatmesh_vertices[srcProvokingIdx].z();
+        // All 3 vertices of a triangle have the same mix (stored in Z of first vertex)
+        int firstVertexIdx = i * 3;
+        unsigned short srcIdx = m_vertexSourceIndices[firstVertexIdx];
+        float ratio = flatmesh_vertices[srcIdx].z();
         float ir = 1.0f - ratio;
         
         uchar r = static_cast<uchar>(m_centerColor.red() * ir + m_outerColor.red() * ratio);
         uchar g = static_cast<uchar>(m_centerColor.green() * ir + m_outerColor.green() * ratio);
         uchar b = static_cast<uchar>(m_centerColor.blue() * ir + m_outerColor.blue() * ratio);
 
-        // Apply the SAME color to all 3 vertices of the triangle.
-        // This simulates 'flat' shading on GLES 2.0.
+        // Apply the same color to all 3 vertices of this triangle
         for (int j = 0; j < 3; ++j) {
             int vertIdx = i * 3 + j;
             vertices[vertIdx].r = r;
