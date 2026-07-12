@@ -64,10 +64,15 @@ protected:
 
 private slots:
     void maybeEnableAnimation();
+    void animate();
 
 private:
     QColor m_centerColor, m_outerColor;
     bool m_animated;
+    bool m_colorsDirty;
+    float m_animationState;
+    int m_loopCount;
+    float m_screenScaleFactor;
     QTimer m_timer;
 };
 

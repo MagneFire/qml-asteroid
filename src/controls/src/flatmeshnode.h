@@ -30,54 +30,28 @@
 #ifndef FLATMESHNODE_H
 #define FLATMESHNODE_H
 
-#include <QObject>
-#include <QQuickWindow>
-#include <QSGSimpleRectNode>
-#include <QElapsedTimer>
+#include <QColor>
+#include <QSGGeometryNode>
 
-#define NUM_POINTS_X 13
-#define NUM_POINTS_Y 13
+#include <vector>
 
-struct Point {
-    qreal centerX;
-    qreal centerY;
-
-    qreal animOriginX;
-    qreal animOriginY;
-
-    qreal animEndX;
-    qreal animEndY;
-
-    QSGGeometry::Point2D currentPos;
-};
-
-class FlatMeshNode : public QObject, public QSGSimpleRectNode
+class FlatMeshNode : public QSGGeometryNode
 {
-    Q_OBJECT
 public:
-    FlatMeshNode(QQuickWindow *window, QRectF rect);
-    void setAnimated(bool animated);
+    FlatMeshNode(float screenScaleFactor);
 
-    void setCenterColor(QColor c);
-    void setOuterColor(QColor c);
-
-public slots:
-    void maybeAnimate();
+    void updateColors(const QColor &centerColor, const QColor &outerColor);
+    void updateGeometry(const QRectF &rect, float animationState, int loopCount);
 
 private:
-    void updateColors();
+    struct BaseVertex {
+        float x;
+        float y;
+        int shiftHash;
+    };
 
-    qreal m_animationState;
-    bool m_animated;
-    int m_unitWidth, m_unitHeight;
-    QColor m_centerColor, m_outerColor;
-    QQuickWindow *m_window;
-    int m_loopCount;
     float m_screenScaleFactor;
-    QElapsedTimer m_animTimer;
-    Point m_points[NUM_POINTS_X*NUM_POINTS_Y];
+    std::vector<BaseVertex> m_baseVertices;
 };
 
-
 #endif // FLATMESHNODE_H
-

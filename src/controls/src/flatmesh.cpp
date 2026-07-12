@@ -30,15 +30,20 @@
 #include "flatmesh.h"
 #include "flatmeshnode.h"
 
-FlatMesh::FlatMesh(QQuickItem *parent) : QQuickItem(parent)
+#include <QSettings>
+
+FlatMesh::FlatMesh(QQuickItem *parent) : QQuickItem(parent),
+    m_animated(false), m_colorsDirty(true), m_animationState(0.0f), m_loopCount(0)
 {
     m_timer.setInterval(90);
     m_timer.setSingleShot(false);
-    connect(&m_timer, SIGNAL(timeout()), this, SLOT(update()));
-    m_timer.start();
+    connect(&m_timer, SIGNAL(timeout()), this, SLOT(animate()));
 
     m_centerColor = QColor("#ffaa39");
     m_outerColor = QColor("#df4829");
+
+    QSettings machineConf("/etc/asteroid/machine.conf", QSettings::IniFormat);
+    m_screenScaleFactor = machineConf.value("Display/ROUND", false).toBool() ? 1.2f : 1.7f;
 
     connect(this, SIGNAL(visibleChanged()), this, SLOT(maybeEnableAnimation()));
 
@@ -51,6 +56,7 @@ void FlatMesh::setCenterColor(QColor c)
     if (c == m_centerColor)
         return;
     m_centerColor = c;
+    m_colorsDirty = true;
     update();
 }
 
@@ -59,6 +65,7 @@ void FlatMesh::setOuterColor(QColor c)
     if (c == m_outerColor)
         return;
     m_outerColor = c;
+    m_colorsDirty = true;
     update();
 }
 
@@ -81,16 +88,29 @@ void FlatMesh::setAnimated(bool animated)
     maybeEnableAnimation();
 }
 
+void FlatMesh::animate()
+{
+    m_animationState += 0.02f;
+    if (m_animationState >= 1.0f) {
+        m_animationState = 0.0f;
+        m_loopCount++;
+    }
+    update();
+}
+
 QSGNode *FlatMesh::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
 {
     FlatMeshNode *n = static_cast<FlatMeshNode *>(old);
-    if (!n)
-        n = new FlatMeshNode(window(), boundingRect());
+    if (!n) {
+        n = new FlatMeshNode(m_screenScaleFactor);
+        m_colorsDirty = true;
+    }
 
-    n->setAnimated(m_animated);
-    n->setRect(boundingRect());
-    n->setCenterColor(m_centerColor);
-    n->setOuterColor(m_outerColor);
+    if (m_colorsDirty) {
+        n->updateColors(m_centerColor, m_outerColor);
+        m_colorsDirty = false;
+    }
+    n->updateGeometry(boundingRect(), m_animationState, m_loopCount);
 
     return n;
 }

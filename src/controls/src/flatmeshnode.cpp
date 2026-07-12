@@ -32,9 +32,7 @@
 
 #include <math.h>
 
-#include <QScreen>
-#include <QElapsedTimer>
-#include <QSettings>
+#include <QSGVertexColorMaterial>
 
 /* Used to compute a triangle color from its distance to the center */
 static inline QColor interpolateColors(const QColor& color1, const QColor& color2, qreal ratio)
@@ -50,128 +48,75 @@ static inline QColor interpolateColors(const QColor& color1, const QColor& color
     return QColor(r, g, b);
 }
 
-FlatMeshNode::FlatMeshNode(QQuickWindow *window, QRectF boundingRect)
-    : QSGSimpleRectNode(boundingRect, Qt::transparent),
-      m_animationState(0), m_animated(true), m_window(window), m_loopCount(0)
+FlatMeshNode::FlatMeshNode(float screenScaleFactor)
+    : m_screenScaleFactor(screenScaleFactor)
 {
-    connect(window, SIGNAL(afterRendering()), this, SLOT(maybeAnimate()));
+    /* All triangles live in a single non-indexed geometry so the scene graph
+     * can draw the whole mesh in one call. Each triangle keeps its flat color
+     * because its three dedicated vertices carry the same color. */
+    QSGGeometry *geometry = new QSGGeometry(QSGGeometry::defaultAttributes_ColoredPoint2D(), flatmesh_indices_sz);
+    geometry->setDrawingMode(QSGGeometry::DrawTriangles);
+    geometry->setVertexDataPattern(QSGGeometry::DynamicPattern);
+    setGeometry(geometry);
+    setFlag(QSGNode::OwnsGeometry);
 
-    QSettings machineConf("/etc/asteroid/machine.conf", QSettings::IniFormat);
-    m_screenScaleFactor = machineConf.value("Display/ROUND", false).toBool() ? 1.2f : 1.7f;
+    setMaterial(new QSGVertexColorMaterial);
+    setFlag(QSGNode::OwnsMaterial);
 
-    /* Create triangle nodes based on pre-computed indices */
-    int numTriangles = flatmesh_indices_sz / 3;
-
-    for (int i = 0; i < numTriangles; i++) {
-        QSGGeometryNode *triangle = new QSGGeometryNode();
-
-        QSGFlatColorMaterial *color = new QSGFlatColorMaterial;
-        triangle->setOpaqueMaterial(color);
-        triangle->setFlag(QSGNode::OwnsMaterial);
-
-        QSGGeometry *geometry = new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(), 3);
-        triangle->setGeometry(geometry);
-        triangle->setFlag(QSGNode::OwnsGeometry);
-
-        appendChildNode(triangle);
+    m_baseVertices.reserve(flatmesh_indices_sz);
+    for (int i = 0; i < flatmesh_indices_sz; i++) {
+        unsigned short srcIdx = flatmesh_indices[i];
+        float baseX = flatmesh_vertices[srcIdx].x();
+        float baseY = flatmesh_vertices[srcIdx].y();
+        int shiftHash = static_cast<int>(baseX * 100.0f) + static_cast<int>(baseY * 100.0f);
+        m_baseVertices.push_back({baseX, baseY, shiftHash});
     }
-
-    maybeAnimate();
 }
 
-void FlatMeshNode::updateColors()
+void FlatMeshNode::updateColors(const QColor &centerColor, const QColor &outerColor)
 {
-    int numTriangles = flatmesh_indices_sz / 3;
-    QSGGeometryNode *triangle = static_cast<QSGGeometryNode *>(firstChild());
+    QSGGeometry::ColoredPoint2D *verts = geometry()->vertexDataAsColoredPoint2D();
 
-    for (int i = 0; i < numTriangles; i++) {
+    for (int i = 0; i < flatmesh_indices_sz; i += 3) {
         /* Get the first vertex index of this triangle to get the color ratio (stored in Z) */
-        unsigned short srcIdx = flatmesh_indices[i * 3];
+        unsigned short srcIdx = flatmesh_indices[i];
         float ratio = flatmesh_vertices[srcIdx].z();
 
-        QSGFlatColorMaterial *color = static_cast<QSGFlatColorMaterial *>(triangle->opaqueMaterial());
-        color->setColor(interpolateColors(m_centerColor, m_outerColor, ratio));
-        triangle->setOpaqueMaterial(color);
-        triangle->markDirty(QSGNode::DirtyMaterial);
-
-        triangle = static_cast<QSGGeometryNode *>(triangle->nextSibling());
-    }
-}
-
-void FlatMeshNode::setCenterColor(QColor c)
-{
-    if (c == m_centerColor)
-        return;
-    m_centerColor = c;
-    updateColors();
-}
-
-void FlatMeshNode::setOuterColor(QColor c)
-{
-    if (c == m_outerColor)
-        return;
-    m_outerColor = c;
-    updateColors();
-}
-
-void FlatMeshNode::setAnimated(bool animated)
-{
-    m_animated = animated;
-}
-
-void FlatMeshNode::maybeAnimate()
-{
-    bool firstFrame = false;
-    if(!m_animTimer.isValid()) {
-        m_animTimer.start();
-        firstFrame = true;
-    }
-
-    if (firstFrame || (m_animated && m_animTimer.elapsed() >= 80)) {
-        m_animTimer.restart();
-        m_animationState += 0.02f;
-
-        float shiftMix = m_animationState;
-        float xOffset = rect().x();
-        float yOffset = rect().y();
-        float itemWidth = rect().width();
-        float itemHeight = rect().height();
-
-        int numTriangles = flatmesh_indices_sz / 3;
-        QSGGeometryNode *triangle = static_cast<QSGGeometryNode *>(firstChild());
-
-        for (int i = 0; i < numTriangles; i++) {
-            QSGGeometry::Point2D *verts = triangle->geometry()->vertexDataAsPoint2D();
-
-            for (int j = 0; j < 3; j++) {
-                unsigned short srcIdx = flatmesh_indices[i * 3 + j];
-
-                float baseX = flatmesh_vertices[srcIdx].x();
-                float baseY = flatmesh_vertices[srcIdx].y();
-
-                int xHash = static_cast<int>(baseX * 100.0f);
-                int yHash = static_cast<int>(baseY * 100.0f);
-                int shiftIndex = m_loopCount + xHash + yHash;
-
-                int idxA = (shiftIndex % flatmesh_shifts_nb + flatmesh_shifts_nb) % flatmesh_shifts_nb;
-                int idxB = ((shiftIndex + 1) % flatmesh_shifts_nb + flatmesh_shifts_nb) % flatmesh_shifts_nb;
-
-                float shiftX = flatmesh_shifts[idxA * 2] + (flatmesh_shifts[idxB * 2] - flatmesh_shifts[idxA * 2]) * shiftMix;
-                float shiftY = flatmesh_shifts[idxA * 2 + 1] + (flatmesh_shifts[idxB * 2 + 1] - flatmesh_shifts[idxA * 2 + 1]) * shiftMix;
-
-                /* Transform: scale by screenScaleFactor, then translate by 0.5, then scale by item size */
-                verts[j].x = xOffset + ((baseX + shiftX) * m_screenScaleFactor + 0.5f) * itemWidth;
-                verts[j].y = yOffset + ((baseY + shiftY) * m_screenScaleFactor + 0.5f) * itemHeight;
-            }
-
-            triangle->markDirty(QSGNode::DirtyGeometry);
-            triangle = static_cast<QSGGeometryNode *>(triangle->nextSibling());
-        }
-
-        if (m_animationState >= 1.0f) {
-            m_animationState = 0.0f;
-            m_loopCount++;
+        QColor color = interpolateColors(centerColor, outerColor, ratio);
+        for (int j = 0; j < 3; j++) {
+            verts[i + j].r = color.red();
+            verts[i + j].g = color.green();
+            verts[i + j].b = color.blue();
+            verts[i + j].a = 255;
         }
     }
+
+    markDirty(QSGNode::DirtyGeometry);
 }
 
+void FlatMeshNode::updateGeometry(const QRectF &rect, float animationState, int loopCount)
+{
+    float xOffset = rect.x();
+    float yOffset = rect.y();
+    float itemWidth = rect.width();
+    float itemHeight = rect.height();
+
+    QSGGeometry::ColoredPoint2D *verts = geometry()->vertexDataAsColoredPoint2D();
+
+    for (int i = 0; i < flatmesh_indices_sz; i++) {
+        const BaseVertex &base = m_baseVertices[i];
+
+        int shiftIndex = loopCount + base.shiftHash;
+        int idxA = (shiftIndex % flatmesh_shifts_nb + flatmesh_shifts_nb) % flatmesh_shifts_nb;
+        int idxB = ((shiftIndex + 1) % flatmesh_shifts_nb + flatmesh_shifts_nb) % flatmesh_shifts_nb;
+
+        float shiftX = flatmesh_shifts[idxA * 2] + (flatmesh_shifts[idxB * 2] - flatmesh_shifts[idxA * 2]) * animationState;
+        float shiftY = flatmesh_shifts[idxA * 2 + 1] + (flatmesh_shifts[idxB * 2 + 1] - flatmesh_shifts[idxA * 2 + 1]) * animationState;
+
+        /* Transform: scale by screenScaleFactor, then translate by 0.5, then scale by item size */
+        verts[i].x = xOffset + ((base.x + shiftX) * m_screenScaleFactor + 0.5f) * itemWidth;
+        verts[i].y = yOffset + ((base.y + shiftY) * m_screenScaleFactor + 0.5f) * itemHeight;
+    }
+
+    markDirty(QSGNode::DirtyGeometry);
+}
